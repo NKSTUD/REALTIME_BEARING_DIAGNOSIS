@@ -1,3 +1,5 @@
+import threading
+import time
 from dataclasses import dataclass, asdict
 from typing import List, Optional
 
@@ -74,13 +76,11 @@ def get_data(
                 )
                 task.start()
 
-
-
                 data = task.read(number_of_samples_per_channel=num_samples, timeout=10.0)
 
                 return pd.DataFrame(data).T.set_axis(sensor_names, axis=1) if isinstance(data[0],
                                                                                          list) else pd.DataFrame(data,
-                                                                                     columns=sensor_names)
+                                                                                                                 columns=sensor_names)
         except nidaqmx.DaqError as e:
             print(f"Erreur lors de l'acquisition des données: {e}")
             return pd.DataFrame(columns=sensor_names)
@@ -93,6 +93,50 @@ def get_data(
             columns=sensor_names)
 
 
+class DataAcquisitionThread(threading.Thread):
+    def __init__(self, data_queue, stop_event, sampling_rate, number_of_samples, selected_sensors, simulation):
+        threading.Thread.__init__(self)
+        self.data_queue = data_queue
+        self.stop_event = stop_event
+        self.sampling_rate = sampling_rate
+        self.number_of_samples = number_of_samples
+        self.selected_sensors = selected_sensors
+        self.simulation = simulation
+
+    def run(self):
+        while not self.stop_event.is_set():
+            data = get_data(
+                sensors=self.selected_sensors,
+                sampling_rate=self.sampling_rate,
+                num_samples=self.number_of_samples,
+                is_started=True,
+                is_simulation=self.simulation
+            )
+            self.data_queue.put(data)
+            time.sleep(0.1)
+
 if __name__ == "__main__":
-    data = get_data(is_started=True)
-    print(data)
+    from queue import Queue
+
+    data_queue = Queue()
+    stop_event = threading.Event()
+
+    acquisition_thread = DataAcquisitionThread(
+        data_queue=data_queue,
+        stop_event=stop_event,
+        sampling_rate=25600,
+        number_of_samples=25600,
+        selected_sensors=default_sensors(),
+        simulation=False
+    )
+    acquisition_thread.start()
+
+    try:
+        while True:
+            if not data_queue.empty():
+                data = data_queue.get()
+                print(data)
+            time.sleep(0.5)  # Adjust sleep time as needed
+    except KeyboardInterrupt:
+        stop_event.set()
+        acquisition_thread.join()

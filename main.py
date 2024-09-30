@@ -36,8 +36,6 @@ if "selected_sensors" not in st.session_state:
 if "data_acquisition" not in st.session_state:
     st.session_state.data_acquisition = False
 
-if "file_index" not in st.session_state:
-    st.session_state.file_index = 0
 
 if "feature_data" not in st.session_state:
     st.session_state.feature_data = pd.DataFrame()
@@ -46,6 +44,7 @@ if "is_simulation" not in st.session_state:
     st.session_state.is_simulation = False
 
 
+FILE_INDEX = 0
 # Functions
 def toggle_stream():
     st.session_state.stream = not st.session_state.stream
@@ -66,11 +65,11 @@ def toggle_data_acquisition():
     #     st.session_state.feature_data = pd.DataFrame()
 
 
-def save_file(data: pd.DataFrame, file_path: str):
+def save_file(data: pd.DataFrame, file_path, output_folder="data_output"):
     home_dir = expanduser("~")
-    default_output_folder = os.path.join(home_dir, "Desktop", "data_output")
-    os.makedirs(default_output_folder, exist_ok=True)
-    data.to_csv(os.path.join(default_output_folder, f"{Path(file_path).stem}.csv"), index=False)
+    output_dir = os.path.join(home_dir, "Desktop", output_folder)
+    os.makedirs(output_dir, exist_ok=True)
+    data.to_csv(os.path.join(output_dir, f"{Path(file_path).stem}.csv"), index=False)
 
 
 def get_all_models():
@@ -177,10 +176,7 @@ logging.basicConfig(level=logging.INFO)
 while st.session_state.stream:
     logging.info("Starting new iteration of data acquisition loop")
 
-    if simulation:
-        st.session_state.is_simulation = True
-    else:
-        st.session_state.is_simulation = False
+    st.session_state.is_simulation = simulation
 
     # Get data
     sensors = format_sensors_for_get_data(st.session_state.selected_sensors)
@@ -232,12 +228,10 @@ while st.session_state.stream:
             st.session_state.previous_features[i][feature] = value
 
         # Update model predictions
-
         features = extract_model_features(column_data)
-
         if features:
             # features = {key: value for key, value in features.items() if key in model_features}
-            probabilities = model_predictions(features)
+            probabilities = model_predictions(features=features, model_path=f"models/{models}")
             placeholders["model_predictions"][i]["chart"].plotly_chart(plot_predictions(probabilities),
                                                                        use_container_width=True)
             best_class = max(probabilities, key=probabilities.get)
@@ -256,22 +250,24 @@ while st.session_state.stream:
                 features_data_placeholder.write(st.session_state.feature_data.style.highlight_max(axis=0))
 
     # Data acquisition logic
-    if st.session_state.data_acquisition:
+    if st.session_state.data_acquisition and FILE_INDEX < number_of_files:
         if "raw" in acquisition_type:
-            st.session_state.file_index += 1
-            save_file(st.session_state.data, os.path.join(output_folder, f"file_{st.session_state.file_index}"))
-            placeholders["data"][0].metric(f"Number of Saved File", st.session_state.file_index)
+            FILE_INDEX += 1
+        
+            save_file(st.session_state.data, os.path.join(output_folder, f"file_{FILE_INDEX}"), output_folder=output_folder)
+            placeholders["data"][0].metric(f"Number of Saved File", FILE_INDEX)
             placeholders["data"][1].write(st.session_state.data)
 
-        # Stop acquisition after the specified number of files
-        if st.session_state.file_index >= number_of_files:
-            st.session_state.data_acquisition = False
-            logging.info("Data acquisition completed")
+        # # Stop acquisition after the specified number of files
+        # if FILE_INDEX >= number_of_files:
+        #     FILE_INDEX = 0
+        #     #st.session_state.data_acquisition = False
+        #     logging.info("Data acquisition completed")
 
     placeholders["data"][1].write(st.session_state.data.style.highlight_max(axis=0))
 
     # Add a small delay at the end of each iteration
-    time.sleep(0.1)
+    # time.sleep(0.1)
 
 logging.info("Exited data acquisition loop")
 
